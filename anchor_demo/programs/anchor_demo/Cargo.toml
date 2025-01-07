@@ -1,0 +1,27 @@
+[package]
+name = "anchor_demo"
+version = "0.1.0"
+description = "Created with Anchor"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "anchor_demo"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+# idl-build = ["anchor-lang/idl-build"]
+idl-build = []
+
+[dependencies]
+anchor-lang = "0.30.1"
+solana-program = "1.18.26"
+
+[dev-dependencies]
+solana-program-test = "1.18.26"
+anchor-spl = "0.30.1"
+solana-sdk = "1.18.26"
