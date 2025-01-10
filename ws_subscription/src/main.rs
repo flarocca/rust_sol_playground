@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use futures::StreamExt;
 use solana_client::{
     nonblocking::{pubsub_client::PubsubClient, rpc_client::RpcClient},
@@ -12,6 +10,7 @@ use solana_sdk::{
 use solana_transaction_status_client_types::{
     EncodedTransaction, UiInstruction, UiMessage, UiParsedInstruction, UiTransactionEncoding,
 };
+use std::str::FromStr;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,11 +24,11 @@ async fn raydium(ws_url: &str, rpc_url: &str) -> Result<(), Box<dyn std::error::
     let ws_client = PubsubClient::new(ws_url).await?;
     let rpc_client = RpcClient::new(rpc_url.to_string());
 
-    let address = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8";
+    let raydium_liquidity_pool_v4 = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8";
 
     let (mut accounts, unsubscriber) = ws_client
         .logs_subscribe(
-            RpcTransactionLogsFilter::Mentions(vec![address.to_owned()]),
+            RpcTransactionLogsFilter::Mentions(vec![raydium_liquidity_pool_v4.to_owned()]),
             RpcTransactionLogsConfig {
                 commitment: Some(CommitmentConfig {
                     commitment: CommitmentLevel::Confirmed,
@@ -39,7 +38,6 @@ async fn raydium(ws_url: &str, rpc_url: &str) -> Result<(), Box<dyn std::error::
         .await?;
 
     while let Some(response) = accounts.next().await {
-        println!("Slot: {:#?}", response.context.slot);
         let logs = response.value.logs;
         let signature = response.value.signature;
         let signature = Signature::from_str(&signature).unwrap();
@@ -47,7 +45,6 @@ async fn raydium(ws_url: &str, rpc_url: &str) -> Result<(), Box<dyn std::error::
         let mut found = false;
         for log in &logs {
             if log.to_lowercase().contains("initialize2") {
-                //println!("NEW POOL CREATED : {:#?}", logs);
                 found = true;
                 break;
             }
@@ -73,7 +70,7 @@ async fn raydium(ws_url: &str, rpc_url: &str) -> Result<(), Box<dyn std::error::
                             parsed_instruction,
                         )) = instruction
                         {
-                            if parsed_instruction.program_id == address {
+                            if parsed_instruction.program_id == raydium_liquidity_pool_v4 {
                                 println!("New Pool Detected");
                                 println!("  Tx Signature: {:#?}", &signature);
                                 println!("  Token A: {:#?}", parsed_instruction.accounts[8]);
