@@ -1,8 +1,10 @@
 mod raydium;
 
-use raydium::{
-    execute_demo, test_pool_created, test_swap_detected, test_swap_exact_input, test_swap_via_api,
-};
+use raydium::test_swap_exact_input;
+
+//use raydium::{
+//    execute_demo, test_pool_created, test_swap_detected, test_swap_exact_input, test_swap_via_api,
+//};
 
 // https://henrytirla.medium.com/how-to-fetch-newly-created-pairs-pools-on-solana-raydium-dex-5baeed3ce8a3
 
@@ -10,7 +12,7 @@ use raydium::{
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ws_url = "wss://api.mainnet-beta.solana.com";
     let rpc_url = "https://api.mainnet-beta.solana.com";
-    let keypair_file_path = "/home/robert/.config/solana/id.json";
+    let keypair_file_path = "/Users/flr/.config/solana/wallet.json";
 
     //execute_demo(ws_url, rpc_url).await
     //test_pool_created(rpc_url).await

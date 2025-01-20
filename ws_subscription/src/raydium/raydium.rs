@@ -1,6 +1,6 @@
 use futures::StreamExt;
-use serde::Deserialize;
-use serde_json::{Value, json};
+use safe_transmute::{transmute_one_pedantic, transmute_one_to_bytes, transmute_to_bytes};
+use serde_json::{json, Value};
 use solana_client::{
     client_error::reqwest,
     nonblocking::{pubsub_client::PubsubClient, rpc_client::RpcClient},
@@ -14,40 +14,23 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::{EncodableKey, Signer},
-    signers::Signers,
     transaction::{Transaction, VersionedTransaction},
 };
 use solana_transaction_status_client_types::{
     EncodedTransaction, UiInstruction, UiMessage, UiParsedInstruction, UiTransactionEncoding,
     UiTransactionStatusMeta,
 };
-use std::{error::Error, str::FromStr};
+use std::{convert::identity, error::Error, str::FromStr};
 
-#[derive(Clone, Copy, Debug)]
-pub struct AmmKeys {
-    pub amm_pool: Pubkey,
-    pub amm_coin_mint: Pubkey,
-    pub amm_pc_mint: Pubkey,
-    pub amm_authority: Pubkey,
-    pub amm_target: Pubkey,
-    pub amm_coin_vault: Pubkey,
-    pub amm_pc_vault: Pubkey,
-    pub amm_lp_mint: Pubkey,
-    pub amm_open_order: Pubkey,
-    pub market_program: Pubkey,
-    pub market: Pubkey,
-    pub nonce: u8,
-}
+use crate::raydium::{
+    models::{AccountFlag, Market, MarketState, MarketStateV2},
+    utils::{gen_vault_signer_key, remove_dex_account_padding},
+};
 
-#[derive(Debug, Clone, Copy)]
-pub struct MarketKeys {
-    pub event_queue: Pubkey,
-    pub bids: Pubkey,
-    pub asks: Pubkey,
-    pub coin_vault: Pubkey,
-    pub pc_vault: Pubkey,
-    pub vault_signer_key: Pubkey,
-}
+use super::{
+    models::{AmmInfo, AmmKeys, MarketKeys},
+    utils::{compute_amm_authority_id, get_account},
+};
 
 const RAYDIUM_LIQUIDITY_POOL_V4_PROGRAM_ID: Pubkey =
     solana_sdk::pubkey!("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8");
@@ -61,7 +44,7 @@ pub async fn execute_demo(ws_url: &str, rpc_url: &str) -> Result<(), Box<dyn std
     let (mut accounts, unsubscriber) = ws_client
         .logs_subscribe(
             RpcTransactionLogsFilter::Mentions(vec![
-                RAYDIUM_LIQUIDITY_POOL_V4_PROGRAM_ID.to_string(),
+                RAYDIUM_LIQUIDITY_POOL_V4_PROGRAM_ID.to_string()
             ]),
             RpcTransactionLogsConfig {
                 commitment: Some(CommitmentConfig {
@@ -338,6 +321,16 @@ async fn swap_exact_input(
     .await
     .unwrap();
 
+    //println!("AMM Keys: {:#?}", &amm_keys);
+    //println!("Market Keys: {:#?}", &market_keys);
+
+    let (amm_keys, market_keys) = get_serum_quote(rpc_client, &amm_keys.amm_pool)
+        .await
+        .unwrap();
+
+    //println!("AMM Keys: {:#?}", &amm_keys);
+    //println!("Market Keys: {:#?}", &market_keys);
+
     let amount_in: u64 = 1_000_000;
     let min_amount_out: u64 = 0;
 
@@ -380,17 +373,19 @@ async fn swap_exact_input(
     let signers: [&dyn Signer; 1] = [&owner];
 
     let transaction = VersionedTransaction::try_new(message.clone(), &signers).unwrap();
-    let _ = rpc_client
+    let simulation_result = rpc_client
         .simulate_transaction(&transaction)
         .await
         .expect("Simulation failed");
 
-    let recent_blockhash = rpc_client.get_latest_blockhash().await.unwrap();
-    message.set_recent_blockhash(recent_blockhash);
-    let transaction = VersionedTransaction::try_new(message.clone(), &signers).unwrap();
+    println!("Simulation result: {:#?}", simulation_result);
 
-    let result = rpc_client.send_and_confirm_transaction(&transaction).await;
-    println!("Transaction result {:#?}", result);
+    //let recent_blockhash = rpc_client.get_latest_blockhash().await.unwrap();
+    //message.set_recent_blockhash(recent_blockhash);
+    //let transaction = VersionedTransaction::try_new(message.clone(), &signers).unwrap();
+    //
+    //let result = rpc_client.send_and_confirm_transaction(&transaction).await;
+    //println!("Transaction result {:#?}", result);
 
     Ok(())
 }
@@ -446,13 +441,16 @@ async fn get_transaction_data(
     let signature = Signature::from_str(&signature).unwrap();
 
     let transaction = rpc_client
-        .get_transaction_with_config(&signature, RpcTransactionConfig {
-            encoding: Some(UiTransactionEncoding::JsonParsed),
-            commitment: Some(CommitmentConfig {
-                commitment: CommitmentLevel::Confirmed,
-            }),
-            max_supported_transaction_version: Some(0),
-        })
+        .get_transaction_with_config(
+            &signature,
+            RpcTransactionConfig {
+                encoding: Some(UiTransactionEncoding::JsonParsed),
+                commitment: Some(CommitmentConfig {
+                    commitment: CommitmentLevel::Confirmed,
+                }),
+                max_supported_transaction_version: Some(0),
+            },
+        )
         .await
         .unwrap();
 
@@ -482,6 +480,71 @@ pub async fn get_serum_quote_via_raydium_api(
     let pool_id = pool.get("id").unwrap().as_str().unwrap();
 
     let (amm_keys, market_keys) = get_pool_keys(vec![pool_id]).await?;
+
+    Ok((amm_keys, market_keys))
+}
+
+async fn get_serum_quote(
+    rpc_client: &RpcClient,
+    amm_pool: &Pubkey,
+) -> Result<(AmmKeys, MarketKeys), Box<dyn Error>> {
+    let amm_info = get_account::<AmmInfo>(rpc_client, amm_pool)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let amm_keys = AmmKeys {
+        amm_pool: *amm_pool,
+        amm_target: amm_info.target_orders,
+        amm_coin_vault: amm_info.coin_vault,
+        amm_pc_vault: amm_info.pc_vault,
+        amm_lp_mint: amm_info.lp_mint,
+        amm_open_order: amm_info.open_orders,
+        amm_coin_mint: amm_info.coin_vault_mint,
+        amm_pc_mint: amm_info.pc_vault_mint,
+        amm_authority: compute_amm_authority_id(
+            &RAYDIUM_LIQUIDITY_POOL_V4_PROGRAM_ID,
+            amm_info.nonce as u8,
+        )?,
+        market: amm_info.market,
+        market_program: amm_info.market_program,
+        nonce: amm_info.nonce as u8,
+    };
+
+    let account_data = rpc_client.get_account_data(&amm_keys.market).await?;
+    let words = remove_dex_account_padding(&account_data)?;
+
+    let market_state: MarketState = {
+        let account_flags = Market::account_flags(&account_data)?;
+        if account_flags.intersects(AccountFlag::Permissioned) {
+            let state = transmute_one_pedantic::<MarketStateV2>(transmute_to_bytes(&words))
+                .map_err(|e| e.without_src())?;
+            //state.check_flags(true)?;
+            state.inner
+        } else {
+            let state = transmute_one_pedantic::<MarketState>(transmute_to_bytes(&words))
+                .map_err(|e| e.without_src())?;
+            //state.check_flags(true)?;
+            state
+        }
+    };
+    let vault_signer_key = gen_vault_signer_key(
+        market_state.vault_signer_nonce,
+        &amm_keys.market,
+        &amm_keys.market_program,
+    )?;
+
+    let market_keys = MarketKeys {
+        event_queue: Pubkey::try_from(transmute_one_to_bytes(&identity(market_state.event_q)))
+            .unwrap(),
+        bids: Pubkey::try_from(transmute_one_to_bytes(&identity(market_state.bids))).unwrap(),
+        asks: Pubkey::try_from(transmute_one_to_bytes(&identity(market_state.asks))).unwrap(),
+        coin_vault: Pubkey::try_from(transmute_one_to_bytes(&identity(market_state.coin_vault)))
+            .unwrap(),
+        pc_vault: Pubkey::try_from(transmute_one_to_bytes(&identity(market_state.pc_vault)))
+            .unwrap(),
+        vault_signer_key,
+    };
 
     Ok((amm_keys, market_keys))
 }
