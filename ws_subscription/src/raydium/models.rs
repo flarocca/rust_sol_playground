@@ -315,6 +315,8 @@ pub struct AmmKeys {
     pub amm_pc_vault: Pubkey,
     pub amm_lp_mint: Pubkey,
     pub amm_open_order: Pubkey,
+    //pub fees: Option<Fees>,
+    //pub state_data: Option<StateData>,
     pub market_program: Pubkey,
     pub market: Pubkey,
     pub nonce: u8,

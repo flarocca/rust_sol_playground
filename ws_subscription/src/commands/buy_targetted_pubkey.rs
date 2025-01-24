@@ -1,11 +1,9 @@
-use std::str::FromStr;
-
 use anyhow::Context;
 use async_trait::async_trait;
 use clap::{Arg, ArgAction, ArgMatches};
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::EncodableKey};
 
-use crate::raydium::{self, event_processors::EventProcessor};
+use crate::raydium::event_processors::EventProcessor;
 
 use super::Command;
 

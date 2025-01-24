@@ -15,20 +15,37 @@ use solana_transaction_status_client_types::{
     EncodedTransaction, UiInstruction, UiMessage, UiParsedInstruction,
 };
 use std::{borrow::Cow, convert::identity, str::FromStr};
+use uint::construct_uint;
 
 use crate::{
     api::solana_rpc::Transaction,
     raydium::{
         event_processors::RAYDIUM_LIQUIDITY_POOL_V4_PROGRAM_ID,
-        models::{AccountFlag, AmmKeys, Market, MarketKeys, MarketState, MarketStateV2, Pool},
+        models::{
+            AccountFlag, AmmInfo, AmmKeys, Market, MarketKeys, MarketState, MarketStateV2, Pool,
+        },
     },
 };
 
 pub const AUTHORITY_AMM: &[u8] = b"amm authority";
 pub const ACCOUNT_HEAD_PADDING: &[u8; 5] = b"serum";
 pub const ACCOUNT_TAIL_PADDING: &[u8; 7] = b"padding";
+pub const TEN_THOUSAND: u64 = 10000;
 
 use super::{EventProcessor, WSOL};
+
+//#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+//#[repr(u64)]
+//pub enum SwapDirection {
+//    /// Input token pc, output token coin
+//    PC2Coin = 1u64,
+//    /// Input token coin, output token pc
+//    Coin2PC = 2u64,
+//}
+//
+//construct_uint! {
+//    pub struct U128(2);
+//}
 
 impl EventProcessor {
     pub async fn get_pool_from_create_transaction(&self, signature: &str) -> anyhow::Result<Pool> {
@@ -82,6 +99,8 @@ impl EventProcessor {
                                 amm_open_order: Pubkey::from_str(amm_open_orders).unwrap(),
                                 market_program: Pubkey::from_str(market_program).unwrap(),
                                 market: Pubkey::from_str(market).unwrap(),
+                                //fees: None,
+                                //state_data: None,
                                 nonce: 0,
                             };
 
@@ -139,106 +158,6 @@ impl EventProcessor {
         }
 
         self.buy(owner, target, pool, amount, simulate_only).await?;
-        //let transaction = self.solana_api.get_transaction(signature).await?;
-        //
-        //let Transaction {
-        //    transaction,
-        //    metadata,
-        //    signature,
-        //    ..
-        //} = transaction;
-        //
-        //println!("\nMetadata: {:#?}\n", &metadata);
-        //println!("\nTransaction: {:#?}\n", &transaction);
-        //
-        //if let EncodedTransaction::Json(ui_transaction) = transaction {
-        //    if let UiMessage::Parsed(ui_parsed_message) = ui_transaction.message {
-        //        for instruction in ui_parsed_message.instructions {
-        //            if let UiInstruction::Parsed(UiParsedInstruction::PartiallyDecoded(
-        //                parsed_instruction,
-        //            )) = instruction
-        //            {
-        //                if parsed_instruction.program_id
-        //                    == RAYDIUM_LIQUIDITY_POOL_V4_PROGRAM_ID.to_string()
-        //                {
-        //                    println!("------------ New Pool Detected ------------");
-        //                    println!("    Tx Signature: {:#?}", &signature);
-        //                    println!("    Instruction: {:#?}", &parsed_instruction);
-        //
-        //                    let amm = &parsed_instruction.accounts[4];
-        //                    let amm_authority = &parsed_instruction.accounts[5];
-        //                    let amm_open_orders = &parsed_instruction.accounts[6];
-        //                    let amm_lp_mint = &parsed_instruction.accounts[7];
-        //                    let amm_coin_mint = &parsed_instruction.accounts[8];
-        //                    let amm_coin_vault = &parsed_instruction.accounts[10];
-        //                    let amm_pc_mint = &parsed_instruction.accounts[9];
-        //                    let amm_pc_vault = &parsed_instruction.accounts[11];
-        //                    let amm_target = &parsed_instruction.accounts[13];
-        //                    let market_program = &parsed_instruction.accounts[15];
-        //                    let market = &parsed_instruction.accounts[16];
-        //
-        //                    if *amm_coin_mint != target.to_string()
-        //                        || *amm_pc_mint != target.to_string()
-        //                    {
-        //                        return anyhow::Result::Err(anyhow::anyhow!(
-        //                            "Target not found in pool creation"
-        //                        ));
-        //                    }
-        //
-        //                    let amm_keys = AmmKeys {
-        //                        amm_pool: Pubkey::from_str(amm).unwrap(),
-        //                        amm_coin_mint: Pubkey::from_str(amm_coin_mint).unwrap(),
-        //                        amm_pc_mint: Pubkey::from_str(amm_pc_mint).unwrap(),
-        //                        amm_authority: Pubkey::from_str(amm_authority).unwrap(),
-        //                        amm_target: Pubkey::from_str(amm_target).unwrap(),
-        //                        amm_coin_vault: Pubkey::from_str(amm_coin_vault).unwrap(),
-        //                        amm_pc_vault: Pubkey::from_str(amm_pc_vault).unwrap(),
-        //                        amm_lp_mint: Pubkey::from_str(amm_lp_mint).unwrap(),
-        //                        amm_open_order: Pubkey::from_str(amm_open_orders).unwrap(),
-        //                        market_program: Pubkey::from_str(market_program).unwrap(),
-        //                        market: Pubkey::from_str(market).unwrap(),
-        //                        nonce: 0,
-        //                    };
-        //
-        //                    let amm_coin_initial_balance =
-        //                        self.solana_api.get_token_balance(amm_coin_vault).await?;
-        //
-        //                    println!(
-        //                        "    AMM Coin Initial Balance: {:#?}",
-        //                        amm_coin_initial_balance
-        //                    );
-        //
-        //                    let amm_pc_initial_balance =
-        //                        self.solana_api.get_token_balance(amm_pc_vault).await?;
-        //                    println!("    AMM PC Initial Balance: {:#?}", amm_pc_initial_balance);
-        //
-        //                    let pool = Pool {
-        //                        amm: amm_keys,
-        //                        initial_coin_balance: amm_coin_initial_balance
-        //                            .amount
-        //                            .parse()
-        //                            .with_context(|| "Failed to parse initial coin balance")?,
-        //                        initial_pc_balance: amm_pc_initial_balance
-        //                            .amount
-        //                            .parse()
-        //                            .with_context(|| "Failed to parse initial pc balance")?,
-        //                    };
-        //
-        //                    println!("    Pool: {:#?}", &pool);
-        //                    println!("-------------------------------------------");
-        //
-        //                    //let mut pools = self.pools.lock().await;
-        //                    //pools.insert(pool.amm.amm_pool, pool.clone());
-        //
-        //                    //self.subscribe_to_new_pool(pool.amm.amm_pool).await?;
-        //                    self.buy(owner, target, pool, amount, simulate_only).await?;
-        //
-        //                    return Ok(());
-        //                }
-        //            }
-        //        }
-        //    }
-        //}
 
         Ok(())
     }
@@ -253,6 +172,8 @@ impl EventProcessor {
     ) -> anyhow::Result<()> {
         let token_mint_input = WSOL;
         let token_mint_output = target;
+        let slippage_bps = 1000_u64;
+        let amount_specified_is_input = true;
         //    let owner = Keypair::read_from_file(keypair_file_path).expect("Error parsing private key");
         //
         //    let token_account_input =
@@ -272,18 +193,48 @@ impl EventProcessor {
         //
 
         let market_keys = self.get_market_keys(&pool).await?;
+        //let (direction, coin_to_pc) = if token_mint_input == pool.amm.amm_coin_mint
+        //    && token_mint_output == pool.amm.amm_pc_mint
+        //{
+        //    (SwapDirection::Coin2PC, true)
+        //} else {
+        //    (SwapDirection::PC2Coin, false)
+        //};
+        //
+        //let (amm_pool_pc_vault_amount, amm_pool_coin_vault_amount) =
+        //    Self::calc_total_without_take_pnl_no_orderbook(
+        //        pool.initial_pc_balance,
+        //        pool.initial_coin_balance,
+        //        &pool.amm,
+        //    )?;
+        //
+        //let (min_output_amount, other_min_output_amount) = Self::swap_with_slippage(
+        //    amm_pool_pc_vault_amount,
+        //    amm_pool_coin_vault_amount,
+        //    //pool.amm.fees.swap_fee_numerator,
+        //    0,
+        //    //pool.amm.fees.swap_fee_denominator,
+        //    0,
+        //    direction,
+        //    amount,
+        //    amount_specified_is_input,
+        //    slippage_bps,
+        //)?;
+        //
+        //println!("Min Output Amount: {:#?}", &min_output_amount);
+        //println!("Other Min Output Amount: {:#?}", &other_min_output_amount);
         //let (amm_keys, market_keys) = self.get_serum_quote(&pool).await?;
         //
         //    //println!("AMM Keys: {:#?}", &amm_keys);
         //    //println!("Market Keys: {:#?}", &market_keys);
         //
         //    let amount_in: u64 = 143594511; //1_000_000;
-        let min_amount_out: u64 = 900_000; //900_000;
 
+        let min_output_amount = 900_000_u64;
         let instruction_tag = 9u8; // "Swap" tag, https://github.com/reactive-biscuit/raydium-amm/blob/ae039d21cd49ef670d76b3a1cf5485ae0213dc5e/program/src/instruction.rs#L487
         let mut swap_data = vec![instruction_tag];
         swap_data.extend_from_slice(&amount.to_le_bytes());
-        swap_data.extend_from_slice(&min_amount_out.to_le_bytes());
+        swap_data.extend_from_slice(&min_output_amount.to_le_bytes());
         //
         //    let swap_accounts = vec![
         //        AccountMeta::new(TOKEN_PROGRAM, false),
@@ -420,6 +371,8 @@ impl EventProcessor {
                                 amm_open_order: Pubkey::from_str(amm_open_orders).unwrap(),
                                 market_program: Pubkey::from_str(market_program).unwrap(),
                                 market: Pubkey::from_str(market).unwrap(),
+                                //fees: None,
+                                //state_data: None,
                                 nonce: 0,
                             };
 
@@ -597,4 +550,277 @@ impl EventProcessor {
     fn gen_vault_signer_seeds<'a>(nonce: &'a u64, market: &'a Pubkey) -> [&'a [u8]; 2] {
         [market.as_ref(), bytes_of(nonce)]
     }
+
+    //fn swap_with_slippage(
+    //    pc_vault_amount: u64,
+    //    coin_vault_amount: u64,
+    //    swap_fee_numerator: u64,
+    //    swap_fee_denominator: u64,
+    //    swap_direction: SwapDirection,
+    //    amount_specified: u64,
+    //    swap_base_in: bool,
+    //    slippage_bps: u64,
+    //) -> anyhow::Result<(u64, u64)> {
+    //    let other_amount_threshold = Self::swap_exact_amount(
+    //        pc_vault_amount,
+    //        coin_vault_amount,
+    //        swap_fee_numerator,
+    //        swap_fee_denominator,
+    //        swap_direction,
+    //        amount_specified,
+    //        swap_base_in,
+    //    )?;
+    //
+    //    let quote = other_amount_threshold;
+    //    let other_amount_threshold = if swap_base_in {
+    //        // min out
+    //        Self::min_amount_with_slippage(other_amount_threshold, slippage_bps)
+    //    } else {
+    //        // max in
+    //        Self::max_amount_with_slippage(other_amount_threshold, slippage_bps)
+    //    };
+    //
+    //    Ok((quote, other_amount_threshold))
+    //
+    //    //let other_amount_threshold = if swap_base_in {
+    //    //    // min out
+    //    //    Self::min_amount_with_slippage(other_amount_threshold, slippage_bps)
+    //    //} else {
+    //    //    // max in
+    //    //    Self::max_amount_with_slippage(other_amount_threshold, slippage_bps)
+    //    //};
+    //    //Ok(other_amount_threshold)
+    //}
+    //
+    //fn swap_exact_amount(
+    //    pc_vault_amount: u64,
+    //    coin_vault_amount: u64,
+    //    swap_fee_numerator: u64,
+    //    swap_fee_denominator: u64,
+    //    swap_direction: SwapDirection,
+    //    amount_specified: u64,
+    //    swap_base_in: bool,
+    //) -> anyhow::Result<u64> {
+    //    let other_amount_threshold = if swap_base_in {
+    //        let swap_fee = U128::from(amount_specified)
+    //            .checked_mul(swap_fee_numerator.into())
+    //            .unwrap()
+    //            .checked_ceil_div(swap_fee_denominator.into())
+    //            .unwrap()
+    //            .0;
+    //        let swap_in_after_deduct_fee =
+    //            U128::from(amount_specified).checked_sub(swap_fee).unwrap();
+    //
+    //        Self::swap_token_amount_base_in(
+    //            swap_in_after_deduct_fee,
+    //            pc_vault_amount.into(),
+    //            coin_vault_amount.into(),
+    //            swap_direction,
+    //        )
+    //        .as_u64()
+    //    } else {
+    //        let swap_in_before_add_fee = Self::swap_token_amount_base_out(
+    //            amount_specified.into(),
+    //            pc_vault_amount.into(),
+    //            coin_vault_amount.into(),
+    //            swap_direction,
+    //        );
+    //
+    //        swap_in_before_add_fee
+    //            .checked_mul(swap_fee_denominator.into())
+    //            .unwrap()
+    //            .checked_ceil_div(
+    //                (swap_fee_denominator
+    //                    .checked_sub(swap_fee_numerator)
+    //                    .unwrap())
+    //                .into(),
+    //            )
+    //            .unwrap()
+    //            .0
+    //            .as_u64()
+    //    };
+    //
+    //    Ok(other_amount_threshold)
+    //}
+    //
+    //fn max_amount_with_slippage(input_amount: u64, slippage_bps: u64) -> u64 {
+    //    input_amount
+    //        .checked_mul(slippage_bps.checked_add(TEN_THOUSAND).unwrap())
+    //        .unwrap()
+    //        .checked_div(TEN_THOUSAND)
+    //        .unwrap()
+    //}
+    //
+    //fn min_amount_with_slippage(input_amount: u64, slippage_bps: u64) -> u64 {
+    //    input_amount
+    //        .checked_mul(TEN_THOUSAND.checked_sub(slippage_bps).unwrap())
+    //        .unwrap()
+    //        .checked_div(TEN_THOUSAND)
+    //        .unwrap()
+    //}
+    //
+    //pub fn swap_token_amount_base_in(
+    //    amount_in: U128,
+    //    total_pc_without_take_pnl: U128,
+    //    total_coin_without_take_pnl: U128,
+    //    swap_direction: SwapDirection,
+    //) -> U128 {
+    //    match swap_direction {
+    //        SwapDirection::Coin2PC => {
+    //            // (x + delta_x) * (y + delta_y) = x * y
+    //            // (coin + amount_in) * (pc - amount_out) = coin * pc
+    //            // => amount_out = pc - coin * pc / (coin + amount_in)
+    //            // => amount_out = ((pc * coin + pc * amount_in) - coin * pc) / (coin + amount_in)
+    //            // => amount_out =  pc * amount_in / (coin + amount_in)
+    //            let denominator = total_coin_without_take_pnl.checked_add(amount_in).unwrap();
+    //            total_pc_without_take_pnl
+    //                .checked_mul(amount_in)
+    //                .unwrap()
+    //                .checked_div(denominator)
+    //                .unwrap()
+    //        }
+    //        SwapDirection::PC2Coin => {
+    //            // (x + delta_x) * (y + delta_y) = x * y
+    //            // (pc + amount_in) * (coin - amount_out) = coin * pc
+    //            // => amount_out = coin - coin * pc / (pc + amount_in)
+    //            // => amount_out = (coin * pc + coin * amount_in - coin * pc) / (pc + amount_in)
+    //            // => amount_out = coin * amount_in / (pc + amount_in)
+    //            let denominator = total_pc_without_take_pnl.checked_add(amount_in).unwrap();
+    //            total_coin_without_take_pnl
+    //                .checked_mul(amount_in)
+    //                .unwrap()
+    //                .checked_div(denominator)
+    //                .unwrap()
+    //        }
+    //    }
+    //}
+    //
+    //pub fn swap_token_amount_base_out(
+    //    amount_out: U128,
+    //    total_pc_without_take_pnl: U128,
+    //    total_coin_without_take_pnl: U128,
+    //    swap_direction: SwapDirection,
+    //) -> U128 {
+    //    match swap_direction {
+    //        SwapDirection::Coin2PC => {
+    //            // (x + delta_x) * (y + delta_y) = x * y
+    //            // (coin + amount_in) * (pc - amount_out) = coin * pc
+    //            // => amount_in = coin * pc / (pc - amount_out) - coin
+    //            // => amount_in = (coin * pc - pc * coin + amount_out * coin) / (pc - amount_out)
+    //            // => amount_in = (amount_out * coin) / (pc - amount_out)
+    //            let denominator = total_pc_without_take_pnl.checked_sub(amount_out).unwrap();
+    //            total_coin_without_take_pnl
+    //                .checked_mul(amount_out)
+    //                .unwrap()
+    //                .checked_ceil_div(denominator)
+    //                .unwrap()
+    //                .0
+    //        }
+    //        SwapDirection::PC2Coin => {
+    //            // (x + delta_x) * (y + delta_y) = x * y
+    //            // (pc + amount_in) * (coin - amount_out) = coin * pc
+    //            // => amount_out = coin - coin * pc / (pc + amount_in)
+    //            // => amount_out = (coin * pc + coin * amount_in - coin * pc) / (pc + amount_in)
+    //            // => amount_out = coin * amount_in / (pc + amount_in)
+    //
+    //            // => amount_in = coin * pc / (coin - amount_out) - pc
+    //            // => amount_in = (coin * pc - pc * coin + pc * amount_out) / (coin - amount_out)
+    //            // => amount_in = (pc * amount_out) / (coin - amount_out)
+    //            let denominator = total_coin_without_take_pnl.checked_sub(amount_out).unwrap();
+    //            total_pc_without_take_pnl
+    //                .checked_mul(amount_out)
+    //                .unwrap()
+    //                .checked_ceil_div(denominator)
+    //                .unwrap()
+    //                .0
+    //        }
+    //    }
+    //}
+    //
+    //fn calc_total_without_take_pnl_no_orderbook<'a>(
+    //    pc_amount: u64,
+    //    coin_amount: u64,
+    //    amm: &'a AmmKeys,
+    //) -> anyhow::Result<(u64, u64)> {
+    //    let total_pc_without_take_pnl = pc_amount
+    //        //.checked_sub(amm.state_data.need_take_pnl_pc)
+    //        .checked_sub(0)
+    //        .with_context(|| "Failed to subtract take pnl pc")?;
+    //
+    //    let total_coin_without_take_pnl = coin_amount
+    //        //.checked_sub(amm.state_data.need_take_pnl_coin)
+    //        .checked_sub(0)
+    //        .with_context(|| "Failed to subtract take pnl coin")?;
+    //
+    //    Ok((total_pc_without_take_pnl, total_coin_without_take_pnl))
+    //}
 }
+
+//pub trait CheckedCeilDiv: Sized {
+//    /// Perform ceiling division
+//    fn checked_ceil_div(&self, rhs: Self) -> Option<(Self, Self)>;
+//}
+
+//impl CheckedCeilDiv for u128 {
+//    fn checked_ceil_div(&self, mut rhs: Self) -> Option<(Self, Self)> {
+//        let mut quotient = self.checked_div(rhs)?;
+//        // Avoid dividing a small number by a big one and returning 1, and instead
+//        // fail.
+//        if quotient == 0 {
+//            // return None;
+//            if self.checked_mul(2_u128)? >= rhs {
+//                return Some((1, 0));
+//            } else {
+//                return Some((0, 0));
+//            }
+//        }
+//
+//        // Ceiling the destination amount if there's any remainder, which will
+//        // almost always be the case.
+//        let remainder = self.checked_rem(rhs)?;
+//        if remainder > 0 {
+//            quotient = quotient.checked_add(1)?;
+//            // calculate the minimum amount needed to get the dividend amount to
+//            // avoid truncating too much
+//            rhs = self.checked_div(quotient)?;
+//            let remainder = self.checked_rem(quotient)?;
+//            if remainder > 0 {
+//                rhs = rhs.checked_add(1)?;
+//            }
+//        }
+//        Some((quotient, rhs))
+//    }
+//}
+//
+//impl CheckedCeilDiv for U128 {
+//    fn checked_ceil_div(&self, mut rhs: Self) -> Option<(Self, Self)> {
+//        let mut quotient = self.checked_div(rhs)?;
+//        // Avoid dividing a small number by a big one and returning 1, and instead
+//        // fail.
+//        let zero = U128::from(0);
+//        let one = U128::from(1);
+//        if quotient.is_zero() {
+//            // return None;
+//            if self.checked_mul(U128::from(2))? >= rhs {
+//                return Some((one, zero));
+//            } else {
+//                return Some((zero, zero));
+//            }
+//        }
+//
+//        // Ceiling the destination amount if there's any remainder, which will
+//        // almost always be the case.
+//        let remainder = self.checked_rem(rhs)?;
+//        if remainder > zero {
+//            quotient = quotient.checked_add(one)?;
+//            // calculate the minimum amount needed to get the dividend amount to
+//            // avoid truncating too much
+//            rhs = self.checked_div(quotient)?;
+//            let remainder = self.checked_rem(quotient)?;
+//            if remainder > zero {
+//                rhs = rhs.checked_add(one)?;
+//            }
+//        }
+//        Some((quotient, rhs))
+//    }
+//}
