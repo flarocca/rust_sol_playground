@@ -165,7 +165,7 @@ pub enum Market<'a> {
 }
 
 impl Market<'_> {
-    pub fn account_flags(account_data: &[u8]) -> Result<BitFlags<AccountFlag>, String> {
+    pub fn account_flags(account_data: &[u8]) -> anyhow::Result<BitFlags<AccountFlag>> {
         let start = ACCOUNT_HEAD_PADDING.len();
         let end = start + size_of::<AccountFlag>();
         assert!(account_data.len() >= end);
@@ -174,7 +174,7 @@ impl Market<'_> {
         flag_bytes.copy_from_slice(&account_data[start..end]);
 
         BitFlags::from_bits(u64::from_le_bytes(flag_bytes))
-            .map_err(|e| e.to_string())
+            .map_err(|e| anyhow::Error::msg(e.to_string()))
             .map(Into::into)
     }
 }

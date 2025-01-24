@@ -29,12 +29,11 @@ pub struct SolanaApi {
 impl SolanaApi {
     pub fn new(
         rpc_url: &str,
-        timeout: Option<Duration>,
+        _timeout: Option<Duration>,
         commitment_config: Option<CommitmentConfig>,
     ) -> Self {
-        let rpc_client = RpcClient::new_with_timeout_and_commitment(
+        let rpc_client = RpcClient::new_with_commitment(
             rpc_url.to_string(),
-            timeout.unwrap_or_default(),
             commitment_config.unwrap_or_default(),
         );
 
@@ -42,7 +41,7 @@ impl SolanaApi {
     }
 
     pub async fn get_transaction(&self, signature: &str) -> anyhow::Result<Transaction> {
-        let signature = Signature::from_str(&signature).unwrap();
+        let signature = Signature::from_str(signature).unwrap();
 
         let transaction = self
             .rpc_client

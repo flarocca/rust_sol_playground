@@ -1,16 +1,20 @@
 use anyhow::{anyhow, Context};
+use bytemuck::bytes_of;
 use futures::StreamExt;
-use safe_transmute::{transmute_many_pedantic, transmute_one_pedantic, transmute_to_bytes};
+use safe_transmute::{
+    transmute_many_pedantic, transmute_one_pedantic, transmute_one_to_bytes, transmute_to_bytes,
+};
 use solana_client::rpc_config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter};
 use solana_sdk::{
     commitment_config::{CommitmentConfig, CommitmentLevel},
+    program_error::ProgramError,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
 };
 use solana_transaction_status_client_types::{
     EncodedTransaction, UiInstruction, UiMessage, UiParsedInstruction,
 };
-use std::{borrow::Cow, str::FromStr};
+use std::{borrow::Cow, convert::identity, str::FromStr};
 
 use crate::{
     api::solana_rpc::Transaction,
@@ -27,15 +31,7 @@ pub const ACCOUNT_TAIL_PADDING: &[u8; 7] = b"padding";
 use super::{EventProcessor, WSOL};
 
 impl EventProcessor {
-    pub async fn buy_new_pool(
-        &self,
-        target: Pubkey,
-        amount: u64,
-        signature: &str,
-        simulate_only: bool,
-    ) -> anyhow::Result<()> {
-        println!("RAYDIUM - Signature: {:#?}", &signature);
-
+    pub async fn get_pool_from_create_transaction(&self, signature: &str) -> anyhow::Result<Pool> {
         let transaction = self.solana_api.get_transaction(signature).await?;
 
         let Transaction {
@@ -73,14 +69,6 @@ impl EventProcessor {
                             let amm_target = &parsed_instruction.accounts[13];
                             let market_program = &parsed_instruction.accounts[15];
                             let market = &parsed_instruction.accounts[16];
-
-                            if *amm_coin_mint != target.to_string()
-                                || *amm_pc_mint != target.to_string()
-                            {
-                                return anyhow::Result::Err(anyhow::anyhow!(
-                                    "Target not found in pool creation"
-                                ));
-                            }
 
                             let amm_keys = AmmKeys {
                                 amm_pool: Pubkey::from_str(amm).unwrap(),
@@ -124,25 +112,140 @@ impl EventProcessor {
                             println!("    Pool: {:#?}", &pool);
                             println!("-------------------------------------------");
 
-                            //let mut pools = self.pools.lock().await;
-                            //pools.insert(pool.amm.amm_pool, pool.clone());
-
-                            //self.subscribe_to_new_pool(pool.amm.amm_pool).await?;
-                            self.buy(target, pool, amount, simulate_only).await?;
-
-                            return Ok(());
+                            return Ok(pool);
                         }
                     }
                 }
             }
         }
 
+        Err(anyhow::anyhow!("Pool not found"))
+    }
+
+    pub async fn buy_new_pool(
+        &self,
+        owner: &Keypair,
+        target: Pubkey,
+        amount: u64,
+        signature: &str,
+        simulate_only: bool,
+    ) -> anyhow::Result<()> {
+        println!("RAYDIUM - Signature: {:#?}", &signature);
+
+        let pool = self.get_pool_from_create_transaction(signature).await?;
+
+        if pool.amm.amm_coin_mint != target || pool.amm.amm_pc_mint != target {
+            return anyhow::Result::Err(anyhow::anyhow!("Target not found in pool creation"));
+        }
+
+        self.buy(owner, target, pool, amount, simulate_only).await?;
+        //let transaction = self.solana_api.get_transaction(signature).await?;
+        //
+        //let Transaction {
+        //    transaction,
+        //    metadata,
+        //    signature,
+        //    ..
+        //} = transaction;
+        //
+        //println!("\nMetadata: {:#?}\n", &metadata);
+        //println!("\nTransaction: {:#?}\n", &transaction);
+        //
+        //if let EncodedTransaction::Json(ui_transaction) = transaction {
+        //    if let UiMessage::Parsed(ui_parsed_message) = ui_transaction.message {
+        //        for instruction in ui_parsed_message.instructions {
+        //            if let UiInstruction::Parsed(UiParsedInstruction::PartiallyDecoded(
+        //                parsed_instruction,
+        //            )) = instruction
+        //            {
+        //                if parsed_instruction.program_id
+        //                    == RAYDIUM_LIQUIDITY_POOL_V4_PROGRAM_ID.to_string()
+        //                {
+        //                    println!("------------ New Pool Detected ------------");
+        //                    println!("    Tx Signature: {:#?}", &signature);
+        //                    println!("    Instruction: {:#?}", &parsed_instruction);
+        //
+        //                    let amm = &parsed_instruction.accounts[4];
+        //                    let amm_authority = &parsed_instruction.accounts[5];
+        //                    let amm_open_orders = &parsed_instruction.accounts[6];
+        //                    let amm_lp_mint = &parsed_instruction.accounts[7];
+        //                    let amm_coin_mint = &parsed_instruction.accounts[8];
+        //                    let amm_coin_vault = &parsed_instruction.accounts[10];
+        //                    let amm_pc_mint = &parsed_instruction.accounts[9];
+        //                    let amm_pc_vault = &parsed_instruction.accounts[11];
+        //                    let amm_target = &parsed_instruction.accounts[13];
+        //                    let market_program = &parsed_instruction.accounts[15];
+        //                    let market = &parsed_instruction.accounts[16];
+        //
+        //                    if *amm_coin_mint != target.to_string()
+        //                        || *amm_pc_mint != target.to_string()
+        //                    {
+        //                        return anyhow::Result::Err(anyhow::anyhow!(
+        //                            "Target not found in pool creation"
+        //                        ));
+        //                    }
+        //
+        //                    let amm_keys = AmmKeys {
+        //                        amm_pool: Pubkey::from_str(amm).unwrap(),
+        //                        amm_coin_mint: Pubkey::from_str(amm_coin_mint).unwrap(),
+        //                        amm_pc_mint: Pubkey::from_str(amm_pc_mint).unwrap(),
+        //                        amm_authority: Pubkey::from_str(amm_authority).unwrap(),
+        //                        amm_target: Pubkey::from_str(amm_target).unwrap(),
+        //                        amm_coin_vault: Pubkey::from_str(amm_coin_vault).unwrap(),
+        //                        amm_pc_vault: Pubkey::from_str(amm_pc_vault).unwrap(),
+        //                        amm_lp_mint: Pubkey::from_str(amm_lp_mint).unwrap(),
+        //                        amm_open_order: Pubkey::from_str(amm_open_orders).unwrap(),
+        //                        market_program: Pubkey::from_str(market_program).unwrap(),
+        //                        market: Pubkey::from_str(market).unwrap(),
+        //                        nonce: 0,
+        //                    };
+        //
+        //                    let amm_coin_initial_balance =
+        //                        self.solana_api.get_token_balance(amm_coin_vault).await?;
+        //
+        //                    println!(
+        //                        "    AMM Coin Initial Balance: {:#?}",
+        //                        amm_coin_initial_balance
+        //                    );
+        //
+        //                    let amm_pc_initial_balance =
+        //                        self.solana_api.get_token_balance(amm_pc_vault).await?;
+        //                    println!("    AMM PC Initial Balance: {:#?}", amm_pc_initial_balance);
+        //
+        //                    let pool = Pool {
+        //                        amm: amm_keys,
+        //                        initial_coin_balance: amm_coin_initial_balance
+        //                            .amount
+        //                            .parse()
+        //                            .with_context(|| "Failed to parse initial coin balance")?,
+        //                        initial_pc_balance: amm_pc_initial_balance
+        //                            .amount
+        //                            .parse()
+        //                            .with_context(|| "Failed to parse initial pc balance")?,
+        //                    };
+        //
+        //                    println!("    Pool: {:#?}", &pool);
+        //                    println!("-------------------------------------------");
+        //
+        //                    //let mut pools = self.pools.lock().await;
+        //                    //pools.insert(pool.amm.amm_pool, pool.clone());
+        //
+        //                    //self.subscribe_to_new_pool(pool.amm.amm_pool).await?;
+        //                    self.buy(owner, target, pool, amount, simulate_only).await?;
+        //
+        //                    return Ok(());
+        //                }
+        //            }
+        //        }
+        //    }
+        //}
+
         Ok(())
     }
 
     async fn buy(
         &self,
-        owner: Keypair,
+        owner: &Keypair,
         target: Pubkey,
         pool: Pool,
         amount: u64,
@@ -167,21 +270,20 @@ impl EventProcessor {
         //    //println!("AMM Keys: {:#?}", &amm_keys);
         //    //println!("Market Keys: {:#?}", &market_keys);
         //
-        let (amm_keys, market_keys) = self
-            .get_serum_quote(rpc_client, &amm_keys.amm_pool)
-            .await
-            .unwrap();
+
+        let market_keys = self.get_market_keys(&pool).await?;
+        //let (amm_keys, market_keys) = self.get_serum_quote(&pool).await?;
         //
         //    //println!("AMM Keys: {:#?}", &amm_keys);
         //    //println!("Market Keys: {:#?}", &market_keys);
         //
         //    let amount_in: u64 = 143594511; //1_000_000;
-        //    let min_amount_out: u64 = 0; //900_000;
-        //
-        //    let instruction_tag = 9u8; // "Swap" tag, https://github.com/reactive-biscuit/raydium-amm/blob/ae039d21cd49ef670d76b3a1cf5485ae0213dc5e/program/src/instruction.rs#L487
-        //    let mut swap_data = vec![instruction_tag];
-        //    swap_data.extend_from_slice(&amount_in.to_le_bytes());
-        //    swap_data.extend_from_slice(&min_amount_out.to_le_bytes());
+        let min_amount_out: u64 = 900_000; //900_000;
+
+        let instruction_tag = 9u8; // "Swap" tag, https://github.com/reactive-biscuit/raydium-amm/blob/ae039d21cd49ef670d76b3a1cf5485ae0213dc5e/program/src/instruction.rs#L487
+        let mut swap_data = vec![instruction_tag];
+        swap_data.extend_from_slice(&amount.to_le_bytes());
+        swap_data.extend_from_slice(&min_amount_out.to_le_bytes());
         //
         //    let swap_accounts = vec![
         //        AccountMeta::new(TOKEN_PROGRAM, false),
@@ -235,36 +337,35 @@ impl EventProcessor {
         Ok(())
     }
 
-    async fn get_serum_quote(&self, pool: &Pool) -> anyhow::Result<(AmmKeys, MarketKeys)> {
-        //let amm_info = self
-        //    .solana_api
-        //    .get_account::<AmmInfo>(&pool.amm.amm_pool)
-        //    .await
-        //    .unwrap()
-        //    .unwrap();
-        //
-        //let amm_keys = AmmKeys {
-        //    amm_pool: *amm_pool,
-        //    amm_target: amm_info.target_orders,
-        //    amm_coin_vault: amm_info.coin_vault,
-        //    amm_pc_vault: amm_info.pc_vault,
-        //    amm_lp_mint: amm_info.lp_mint,
-        //    amm_open_order: amm_info.open_orders,
-        //    amm_coin_mint: amm_info.coin_vault_mint,
-        //    amm_pc_mint: amm_info.pc_vault_mint,
-        //    amm_authority: compute_amm_authority_id(
-        //        &RAYDIUM_LIQUIDITY_POOL_V4_PROGRAM_ID,
-        //        amm_info.nonce as u8,
-        //    )?,
-        //    market: amm_info.market,
-        //    market_program: amm_info.market_program,
-        //    nonce: amm_info.nonce as u8,
-        //};
+    //async fn get_serum_quote(&self, pool: &Pool) -> anyhow::Result<MarketKeys> {
+    //let amm_info = self
+    //    .solana_api
+    //    .get_account::<AmmInfo>(&pool.amm.amm_pool)
+    //    .await
+    //    .unwrap()
+    //    .unwrap();
+    //
+    //let amm_keys = AmmKeys {
+    //    amm_pool: *amm_pool,
+    //    amm_target: amm_info.target_orders,
+    //    amm_coin_vault: amm_info.coin_vault,
+    //    amm_pc_vault: amm_info.pc_vault,
+    //    amm_lp_mint: amm_info.lp_mint,
+    //    amm_open_order: amm_info.open_orders,
+    //    amm_coin_mint: amm_info.coin_vault_mint,
+    //    amm_pc_mint: amm_info.pc_vault_mint,
+    //    amm_authority: compute_amm_authority_id(
+    //        &RAYDIUM_LIQUIDITY_POOL_V4_PROGRAM_ID,
+    //        amm_info.nonce as u8,
+    //    )?,
+    //    market: amm_info.market,
+    //    market_program: amm_info.market_program,
+    //    nonce: amm_info.nonce as u8,
+    //};
 
-        let account_data = self.solana_api.get_account_data(&pool.amm.market).await?;
-
-        Ok((amm_keys, market_keys))
-    }
+    //let market_keys = self.get_market_keys(pool).await?;
+    //Ok(market_keys)
+    //}
 
     pub async fn process_new_pool(&self, signature: &str) -> anyhow::Result<()> {
         println!("Signature: {:#?}", &signature);
@@ -405,43 +506,10 @@ impl EventProcessor {
 
         Ok(())
     }
-    pub fn remove_dex_account_padding<'a>(data: &'a [u8]) -> anyhow::Result<Cow<'a, [u64]>> {
-        let head = &data[..ACCOUNT_HEAD_PADDING.len()];
-        if data.len() < ACCOUNT_HEAD_PADDING.len() + ACCOUNT_TAIL_PADDING.len() {
-            return Err(anyhow!(
-                "dex account length {} is too small to contain valid padding",
-                data.len()
-            ));
-        }
 
-        if head != ACCOUNT_HEAD_PADDING {
-            return Err(anyhow!("dex account head padding mismatch".to_string()));
-        }
-
-        let tail = &data[data.len() - ACCOUNT_TAIL_PADDING.len()..];
-        if tail != ACCOUNT_TAIL_PADDING {
-            return Err(anyhow!("dex account tail padding mismatch".to_string()));
-        }
-
-        let inner_data_range =
-            ACCOUNT_HEAD_PADDING.len()..(data.len() - ACCOUNT_TAIL_PADDING.len());
-
-        let inner: &'a [u8] = &data[inner_data_range];
-        let words: Cow<'a, [u64]> = match transmute_many_pedantic::<u64>(inner) {
-            Ok(word_slice) => Cow::Borrowed(word_slice),
-            Err(transmute_error) => {
-                let word_vec = transmute_error
-                    .copy()
-                    .with_context(|| "Error reading account data")?;
-                Cow::Owned(word_vec)
-            }
-        };
-
-        Ok(words)
-    }
-
-    fn get_market_keys(account_data: [u8]) -> anyhow::Result<MarketKeys> {
-        let words = Self::remove_dex_account_padding(&account_data)?;
+    pub(crate) async fn get_market_keys(&self, pool: &Pool) -> anyhow::Result<MarketKeys> {
+        let account_data = self.solana_api.get_account_data(&pool.amm.market).await?;
+        let words = Self::remove_dex_account_padding(&account_data).map_err(anyhow::Error::msg)?;
 
         let market_state: MarketState = {
             let account_flags = Market::account_flags(&account_data)?;
@@ -457,10 +525,13 @@ impl EventProcessor {
                 state
             }
         };
-        let vault_signer_key = gen_vault_signer_key(
+
+        println!("Market State: {:#?}", &market_state);
+
+        let vault_signer_key = Self::gen_vault_signer_key(
             market_state.vault_signer_nonce,
-            &amm_keys.market,
-            &amm_keys.market_program,
+            &pool.amm.market,
+            &pool.amm.market_program,
         )?;
 
         let market_keys = MarketKeys {
@@ -476,27 +547,54 @@ impl EventProcessor {
                 .unwrap(),
             vault_signer_key,
         };
-        //let account_data = self.solana_api.get_account_data(&pool.amm.market).await?;
-        //
-        //let account_flags = Market::account_flags(&account_data)?;
-        //
-        //if !account_flags.contains(AccountFlag::Initialized) {
-        //    return Err("Market account not initialized".to_string());
-        //}
-        //
-        //let market_state = MarketStateV2::from_bytes(&account_data)?;
-        //
-        //market_state.check_flags(false)?;
-        //
-        //let market_keys = MarketKeys {
-        //    bids: market_state.inner.bids,
-        //    asks: market_state.inner.asks,
-        //    event_queue: market_state.inner.event_queue,
-        //    coin_vault: market_state.inner.coin_vault,
-        //    pc_vault: market_state.inner.pc_vault,
-        //    vault_signer_key: gen_vault_signer_key(market_state.inner.vault_signer_nonce, &pool.amm.market, &RAYDIUM_LIQUIDITY_POOL_V4_PROGRAM_ID)?,
-        //};
 
         Ok(market_keys)
+    }
+
+    fn remove_dex_account_padding<'a>(data: &'a [u8]) -> Result<Cow<'a, [u64]>, String> {
+        let head = &data[..ACCOUNT_HEAD_PADDING.len()];
+        if data.len() < ACCOUNT_HEAD_PADDING.len() + ACCOUNT_TAIL_PADDING.len() {
+            return Err(format!(
+                "dex account length {} is too small to contain valid padding",
+                data.len()
+            ));
+        }
+
+        if head != ACCOUNT_HEAD_PADDING {
+            return Err("dex account head padding mismatch".to_string());
+        }
+
+        let tail = &data[data.len() - ACCOUNT_TAIL_PADDING.len()..];
+        if tail != ACCOUNT_TAIL_PADDING {
+            return Err("dex account tail padding mismatch".to_string());
+        }
+
+        let inner_data_range =
+            ACCOUNT_HEAD_PADDING.len()..(data.len() - ACCOUNT_TAIL_PADDING.len());
+
+        let inner = &data[inner_data_range];
+        let words: Cow<'a, [u64]> = match transmute_many_pedantic::<u64>(inner) {
+            Ok(word_slice) => Cow::Borrowed(word_slice),
+            Err(transmute_error) => {
+                let word_vec = transmute_error.copy().map_err(|e| e.to_string())?;
+                Cow::Owned(word_vec)
+            }
+        };
+
+        Ok(words)
+    }
+
+    #[inline]
+    fn gen_vault_signer_key(
+        nonce: u64,
+        market: &Pubkey,
+        program_id: &Pubkey,
+    ) -> Result<Pubkey, ProgramError> {
+        let seeds = Self::gen_vault_signer_seeds(&nonce, market);
+        Ok(Pubkey::create_program_address(&seeds, program_id)?)
+    }
+
+    fn gen_vault_signer_seeds<'a>(nonce: &'a u64, market: &'a Pubkey) -> [&'a [u8]; 2] {
+        [market.as_ref(), bytes_of(nonce)]
     }
 }

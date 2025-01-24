@@ -9,7 +9,7 @@ use solana_client::{
 use solana_sdk::{
     commitment_config::{CommitmentConfig, CommitmentLevel},
     pubkey::Pubkey,
-    signature::Signature,
+    signature::{Keypair, Signature},
 };
 use tokio::sync::Mutex;
 
@@ -22,7 +22,7 @@ pub mod pool_created;
 
 const RAYDIUM_LIQUIDITY_POOL_V4_PROGRAM_ID: Pubkey =
     solana_sdk::pubkey!("675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8");
-const WSOL = solana_sdk::pubkey!("So11111111111111111111111111111111111111112");
+const WSOL: Pubkey = solana_sdk::pubkey!("So11111111111111111111111111111111111111112");
 //const TOKEN_PROGRAM: Pubkey = solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 //const SERUM_PROGRAM: Pubkey = solana_sdk::pubkey!("srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX");
 
@@ -37,12 +37,16 @@ pub struct EventProcessor {
 
 impl EventProcessor {
     pub async fn new(rpc_url: &str, ws_url: &str) -> anyhow::Result<Self> {
-        let ws_client    = PubsubClient::new(ws_url)
+        let ws_client = PubsubClient::new(ws_url)
             .await
             .with_context(|| "Failed to create WS client")?;
-        let solana_api = SolanaApi::new(rpc_url, None, Some(CommitmentConfig {
-            commitment: CommitmentLevel::Processed,
-        }));
+        let solana_api = SolanaApi::new(
+            rpc_url,
+            None,
+            Some(CommitmentConfig {
+                commitment: CommitmentLevel::Processed,
+            }),
+        );
 
         let pools = Mutex::new(HashMap::new());
         let subscriptions = Mutex::new(HashMap::new());
@@ -57,6 +61,7 @@ impl EventProcessor {
 
     pub async fn execute_on_creation(
         &self,
+        owner: Keypair,
         target: Pubkey,
         amount: u64,
         simulate_only: bool,
@@ -85,7 +90,7 @@ impl EventProcessor {
             for log in &logs {
                 if log.to_lowercase().contains("initialize2") {
                     println!("RAYDIUM - Pool creation detected for key {:#?}", target);
-                    self.buy_new_pool(target, amount, &signature, simulate_only)
+                    self.buy_new_pool(&owner, target, amount, &signature, simulate_only)
                         .await?;
                 }
             }

@@ -3,7 +3,7 @@ use std::str::FromStr;
 use anyhow::Context;
 use async_trait::async_trait;
 use clap::{Arg, ArgAction, ArgMatches};
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::EncodableKey};
 
 use crate::raydium::{self, event_processors::EventProcessor};
 
@@ -22,18 +22,25 @@ impl Command for BuyOnCreationTargettedPubkey {
             .with_context(|| "WS URL is required")?;
         let target_pubkey = args
             .get_one::<String>("target-pubkey")
-            .with_context(|| "WS URL is required")?
+            .with_context(|| "Target pubkey is required")?
             .parse::<Pubkey>()
             .with_context(|| "Failed to parse target pubkey")?;
         let amount = args
             .get_one::<String>("amount")
-            .expect("WS URL is required")
+            .with_context(|| "Amount is required")?
             .parse::<u64>()
             .with_context(|| "Failed to parse amount")?;
+        let owner_file_path = args
+            .get_one::<String>("owner-file-path")
+            .with_context(|| "Owner file path is required")?;
+
+        let owner = Keypair::read_from_file(owner_file_path)
+            .map_err(|e| anyhow::Error::msg(e.to_string()))
+            .with_context(|| "Error parsing private key")?;
 
         let raydium_processor = EventProcessor::new(rpc_url, ws_url).await?;
         raydium_processor
-            .execute_on_creation(target_pubkey, amount, true)
+            .execute_on_creation(owner, target_pubkey, amount, true)
             .await?;
 
         Ok(())
@@ -78,6 +85,12 @@ impl Command for BuyOnCreationTargettedPubkey {
                     .long("simulate-only")
                     .action(ArgAction::SetFalse)
                     .help("Simulate the buy without actually executing it"),
+            )
+            .arg(
+                Arg::new("owner-file-path")
+                    .long("owner-file-path")
+                    .action(ArgAction::Set)
+                    .help("The file path to the owner keypair"),
             )
     }
 
