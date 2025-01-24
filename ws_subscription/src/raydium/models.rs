@@ -164,7 +164,7 @@ pub enum Market<'a> {
     V2Ref(Ref<'a, MarketStateV2>),
 }
 
-impl<'a> Market<'a> {
+impl Market<'_> {
     pub fn account_flags(account_data: &[u8]) -> Result<BitFlags<AccountFlag>, String> {
         let start = ACCOUNT_HEAD_PADDING.len();
         let end = start + size_of::<AccountFlag>();
@@ -328,4 +328,11 @@ pub struct MarketKeys {
     pub coin_vault: Pubkey,
     pub pc_vault: Pubkey,
     pub vault_signer_key: Pubkey,
+}
+
+#[derive(Debug, Clone)]
+pub struct Pool {
+    pub amm: AmmKeys,
+    pub initial_coin_balance: u64,
+    pub initial_pc_balance: u64,
 }
